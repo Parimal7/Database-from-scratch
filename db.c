@@ -66,6 +66,30 @@ typedef struct {
     Pager* pager;
 } Table;
 
+typedef struct {
+    Table* table;
+    uint32_t row_num;
+    bool end_of_table; // Indicated a position one past the last element
+} Cursor;
+
+Cursor* table_start(Table* table) {
+    Cursor* cursor = malloc(sizeof(Cursor));
+    cursor->table = table;
+    cursor->row_num = 0;
+    cursor->end_of_table = (table->num_rows == 0);
+
+    return cursor;
+}
+
+Cursor* table_end(Table* table) {
+    Cursor* cursor = malloc(sizeof(Cursor));
+    cursor->table = table;
+    cursor->row_num = table->num_rows;
+    cursor->end_of_table = true;
+
+    return cursor;
+}
+
 void print_row(Row* row) {
     printf("(%d, %s, %s)\n", row->id, row->username, row->email);
 }
@@ -186,12 +210,20 @@ void db_close(Table* table) {
 
 
 // function to find where to read/write in memory for a particular row
-void* row_slot(Table* table, uint32_t row_num) {
+void* cursor_value(Cursor* cursor) {
+    uint32_t row_num = cursor->row_num;
     uint32_t page_num = row_num / ROWS_PER_PAGE;
-    void* page = get_page(table->pager, page_num);
+    void* page = get_page(cursor->table->pager, page_num);
     uint32_t row_offset = row_num % ROWS_PER_PAGE;
     uint32_t byte_offset = row_offset * ROW_SIZE;
     return page + byte_offset;
+}
+
+void cursor_advance(Cursor* cursor) {
+    cursor->row_num += 1;
+    if (cursor->row_num >= cursor->table->num_rows) {
+        cursor->end_of_table = true;
+    }
 }
 
 
@@ -200,7 +232,15 @@ MetaCommandResult do_meta_command(InputBuffer* input_buffer, Table* table) {
     if(strcmp(input_buffer->buffer, ".exit") == 0) {
         db_close(table);
         exit(EXIT_SUCCESS);
-    } else {
+    } 
+    else if(strcmp(input_buffer->buffer, ".help") == 0) {
+        printf("insert id(int) name(varchar) email(varchar) for inserting data into the table.\n\n");
+        printf("select for viewing inserted rows.\n\n");
+        printf(".exit to exit the application\n\n");
+        return META_COMMAND_SUCCESS;
+    }
+    
+    else {
         return META_COMMAND_UNRECOGNIZED_COMMAND;
     }
 }
@@ -254,19 +294,27 @@ ExecuteResult execute_insert(Statement* statement, Table* table) {
         return EXECUTE_TABLE_FULL;
     }
 
-    Row* row_to_insert = &(statement->row_to_insert); 
-    serialize_row(row_to_insert, row_slot(table, table->num_rows));
+    Row* row_to_insert = &(statement->row_to_insert);
+    Cursor* cursor = table_end(table);
+    serialize_row(row_to_insert, cursor_value(cursor));
     table->num_rows += 1;
+
+    free(cursor);
 
     return EXECUTE_SUCCESS;
 }
 
 ExecuteResult execute_select(Table* table) {
+    Cursor* cursor = table_start(table);
     Row row;
-    for (uint32_t i = 0; i < table->num_rows; i++) {
-        deserialize_row(row_slot(table, i), &row);
+    
+    while(!(cursor->end_of_table)) {
+        deserialize_row(cursor_value(cursor), &row);
         print_row(&row);
+        cursor_advance(cursor);
     }
+
+    free(cursor);
     return EXECUTE_SUCCESS;
 }
 
@@ -329,7 +377,9 @@ InputBuffer* new_input_buffer() {
     return input_buffer;
 }
 
-void print_prompt() { printf("db > "); }
+void print_prompt() { 
+    printf("db > "); 
+}
 
 void read_input(InputBuffer* input_buffer) {
     ssize_t bytes_read = getline(&(input_buffer->buffer), &(input_buffer->buffer_length), stdin);
@@ -359,6 +409,9 @@ int main(int argc, char* argv[]) {
     Table* table = db_open(filename);
 
     InputBuffer* input_buffer = new_input_buffer();
+    printf("<=======================>\n");
+    printf("Welcome to sqlite-clone.\nAuthor: Parimal Prasoon (parimalprasoon7@gmail.com)\n");
+    printf("Type .help for a list of commands.\n");
     while(1) {
         print_prompt();
         read_input(input_buffer);
