@@ -2,7 +2,7 @@
 
 1. `git clone https://github.com/Parimal7/Database-from-scratch.git`
 2. `clang db.c -o db.out`
-3. .`./db.out mydb.db`
+3. `./db.out mydb.db`
 
 ## Supported Operations
 - You can type `.help` for a list of possible commands.
